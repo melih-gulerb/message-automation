@@ -7,21 +7,29 @@ import (
 )
 
 var (
-	GetSentMessagesQuery = func(limit int) string {
+	GetSentMessagesQuery = func(limit int, messageId string) string {
 		query := []string{"SELECT"}
-		if limit != -1 {
+
+		if limit != 0 {
 			query = append(query, fmt.Sprintf("TOP %d", limit))
 		}
+
 		query = append(query, `Id, Recipient, Content, Status, CreatedAt, SentAt 
-                              FROM Messages 
-                              WHERE status = 'Sent'
-                              ORDER BY CreatedAt DESC`)
+                          FROM Messages 
+                          WHERE status = 'Sent'`)
+
+		if messageId != "" {
+			query = append(query, fmt.Sprintf("AND Id = '%s'", messageId))
+		}
+
+		query = append(query, "ORDER BY CreatedAt DESC")
+
 		return strings.Join(query, "\n")
 	}
 
 	GetUnsentMessagesQuery = func(limit int) string {
 		query := []string{"SELECT"}
-		if limit != -1 {
+		if limit != 0 {
 			query = append(query, fmt.Sprintf("TOP %d", limit))
 		}
 		query = append(query, `Id, Recipient, Content

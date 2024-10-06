@@ -3,7 +3,6 @@ package middlewares
 import (
 	"fmt"
 	"github.com/labstack/echo/v4"
-	"log"
 	"message-automation/src/models/base"
 	"net/http"
 )
@@ -14,22 +13,31 @@ func RecoverMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 			if r := recover(); r != nil {
 				switch e := r.(type) {
 				case *base.NotFoundError:
-					log.Printf("NotFoundError: %s", e.Error())
-					_ = c.JSON(http.StatusNotFound, map[string]interface{}{
-						"error":   "Not Found",
-						"message": e.Error(),
+					base.Log(fmt.Sprintf("NotFoundError: %s", e.Error()))
+					_ = c.JSON(http.StatusNotFound, base.Response[base.Error]{
+						Success: false,
+						Data: base.Error{
+							Code:    404,
+							Message: e.Error(),
+						},
 					})
 				case *base.BadRequestError:
-					log.Printf("BadRequestError: %s", e.Error())
-					_ = c.JSON(http.StatusBadRequest, map[string]interface{}{
-						"error":   "Bad Request",
-						"message": e.Error(),
+					base.Log(fmt.Sprintf("BadRequestError: %s", e.Error()))
+					_ = c.JSON(http.StatusBadRequest, base.Response[base.Error]{
+						Success: false,
+						Data: base.Error{
+							Code:    400,
+							Message: e.Error(),
+						},
 					})
 				default:
-					log.Printf("InternalServerError: %s", e)
-					_ = c.JSON(http.StatusInternalServerError, map[string]interface{}{
-						"error":   "Internal Server Error",
-						"message": fmt.Sprintf("exception: %v", e),
+					base.Log(fmt.Sprintf("InternalServerError: %s", e))
+					_ = c.JSON(http.StatusInternalServerError, base.Response[base.Error]{
+						Success: false,
+						Data: base.Error{
+							Code:    500,
+							Message: fmt.Sprintf("%s", e),
+						},
 					})
 				}
 			}

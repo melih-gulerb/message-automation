@@ -1,105 +1,155 @@
 package services
 
 import (
+	"context"
 	"fmt"
-	"log"
 	"message-automation/src/clients"
 	"message-automation/src/models"
 	"message-automation/src/models/base"
 	"message-automation/src/repositories"
+	"message-automation/src/validators"
 	"strconv"
+	"strings"
 	"time"
 )
 
 type MessageService struct {
-	MessageRepository *repositories.MessageRepository
-	WebhookClient     *clients.WebhookClient
-	RedisClient       *clients.RedisClient
-	IsActiveStatus    bool
+	MessageRepository   *repositories.MessageRepository
+	WebhookClient       *clients.WebhookClient
+	RedisClient         *clients.RedisClient
+	IsActiveStatus      bool
+	MessagePerExecution int
+	ExecutionPeriod     time.Duration
 }
 
-func NewMessageService(messageRepository *repositories.MessageRepository, webhookClient *clients.WebhookClient, redisClient *clients.RedisClient) *MessageService {
-	return &MessageService{MessageRepository: messageRepository, WebhookClient: webhookClient, RedisClient: redisClient, IsActiveStatus: true}
+func NewMessageService(messageRepository *repositories.MessageRepository, webhookClient *clients.WebhookClient,
+	redisClient *clients.RedisClient, messagePerExecution int, executionPeriod time.Duration) *MessageService {
+	return &MessageService{MessageRepository: messageRepository, WebhookClient: webhookClient, RedisClient: redisClient,
+		IsActiveStatus: true, MessagePerExecution: messagePerExecution, ExecutionPeriod: executionPeriod}
 }
 
-func (s *MessageService) RetrieveSentMessages(limitQuery string) []models.Message {
+func (s *MessageService) RetrieveSentMessages(limitQuery, messageId string) []models.Message {
 	var err error
-	limit, err := strconv.Atoi(limitQuery)
+	err = validators.ValidateRetrieveSentMessages(limitQuery, messageId)
 	if err != nil {
-		// panic err
+		panic(err)
 	}
-	messages, err := s.MessageRepository.RetrieveSentMessages(limit)
+
+	limit, _ := strconv.Atoi(limitQuery)
+	messages, err := s.MessageRepository.GetSentMessages(limit, messageId)
 	if err != nil {
-		// panic err
+		panic(&base.BadRequestError{
+			Message: fmt.Sprint("Failed to retrieve sent messages"),
+		})
 	}
 
 	return messages
 }
 
+// HandleAutomation starts/stops automation
 func (s *MessageService) HandleAutomation(isActiveQuery string) {
 	var err error
-	isActive, err := strconv.ParseBool(isActiveQuery)
-	if err != nil {
-		panic(&base.BadRequestError{Message: fmt.Sprintf("Unable to parse boolean for %s", isActiveQuery)})
+	if err = validators.ValidateHandleAutomation(isActiveQuery, s.IsActiveStatus); err != nil {
+		panic(err)
 	}
 
-	if s.IsActiveStatus == isActive {
-		panic(&base.BadRequestError{Message: fmt.Sprintf("Automation is already in requested state")})
-	} else {
-		s.IsActiveStatus = isActive
-		go s.ExecuteAutomation(2)
-	}
+	isActive, _ := strconv.ParseBool(isActiveQuery)
 
-	return
+	s.IsActiveStatus = isActive
+	if isActive {
+		go s.ExecuteAutomation()
+	}
 }
 
-func (s *MessageService) ExecuteAutomation(limit int) {
+// ExecuteAutomation handles message process which will work with goroutine
+func (s *MessageService) ExecuteAutomation() {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("Recovered from panic: %v. Retrying execution after 2 minutes...", r)
-			time.Sleep(15 * time.Second)
+			base.Log(fmt.Sprintf("Recovered from panic: %v. Retrying execution after 2 minutes", r))
+			time.Sleep(2 * time.Minute)
 
 			// Re-execute message automation after panic recovery
-			go s.ExecuteAutomation(limit)
+			go s.ExecuteAutomation()
 		}
 	}()
 
 	for {
 		if s.IsActiveStatus == false {
-			fmt.Printf("\n[%s] Automation deactivated, stopping execution", time.Now().Format("2006-01-02.15.04.05"))
+			base.Log(fmt.Sprint("Automation deactivated, stopping execution"))
 			return
 		} else {
-			s.executeAutomation(2)
+			s.processMessages(s.MessagePerExecution)
 
-			fmt.Printf("\n[%s] Message execution will restart after 20 sec", time.Now().Format("2006-01-02.15.04.05"))
-			time.Sleep(time.Second * 20)
+			base.Log(fmt.Sprintf("Message execution will restart after %v minutes", s.ExecutionPeriod.Minutes()))
+			time.Sleep(s.ExecutionPeriod)
 		}
 	}
 }
 
+// ExecuteAutomationForProjectDeployment handles message process for the deployment
 func (s *MessageService) ExecuteAutomationForProjectDeployment() {
-	log.Printf("\n[%s] Executing all unsent messages with the project deployment", time.Now().Format("2006-01-02.15.04.05"))
-	s.executeAutomation(-1)
-	log.Printf("\n[%s] Executed all unsent messages successfully", time.Now().Format("2006-01-02.15.04.05"))
+	base.Log(fmt.Sprint("Executing all unsent messages with the project deployment"))
+	s.processMessages(0)
+	base.Log(fmt.Sprint("Executed all unsent messages successfully"))
 }
 
-func (s *MessageService) executeAutomation(limit int) {
+func (s *MessageService) processMessages(limit int) {
 	messages, err := s.MessageRepository.GetUnsentMessages(limit)
 	if err != nil {
-		fmt.Printf("\n[%s] Error fetching unsent messages: %v", time.Now().Format("2006-01-02.15.04.05"), err)
+		base.Log(fmt.Sprintf("Error occurred while acquiring unsent messages: %v", err))
+
 		return
 	}
 
 	for _, message := range messages {
-		ws, err := s.WebhookClient.SendMessage(message.Recipient, message.Content)
-		if err != nil {
-			fmt.Printf("\n[%s] Error sending message to recipient %s: %v", time.Now().Format("2006-01-02.15.04.05"), message.Recipient, err)
-			return
-		}
-		fmt.Printf("\n[%s] Successfully sent message to recipient %s. Webhook response: %v", time.Now().Format("2006-01-02.15.04.05"), message.Recipient, ws)
-		if err = s.MessageRepository.UpdateMessageStatus(message); err != nil {
-			fmt.Printf("\n[%s] Error updating status for the messageId %s: %v", time.Now().Format("2006-01-02.15.04.05"), message.Id, err)
-			return
-		}
+		s.processSingleMessage(message)
 	}
+}
+
+func (s *MessageService) processSingleMessage(message models.Message) {
+	ctx := context.Background()
+	transaction, err := s.MessageRepository.BeginTransaction(ctx)
+	if err != nil {
+		base.Log(fmt.Sprintf("Error creating transaction for message %s: %v", message.Id.String(), err))
+	}
+
+	if err = s.MessageRepository.UpdateMessageStatus(message, transaction); err != nil {
+		_ = transaction.Rollback()
+		base.Log(fmt.Sprintf("Error updating message status for message %s: %v", message.Id.String(), err))
+	}
+
+	messageId, err := s.sendMessageToWebhook(message)
+	if err != nil {
+		base.Log(fmt.Sprintf("Error sending message %s: %v", message.Id.String(), err))
+
+		_ = transaction.Rollback()
+		return
+	}
+
+	if err = transaction.Commit(); err != nil {
+		base.Log(fmt.Sprintf("Error committing transaction for message %s: %v", message.Id.String(), err))
+
+		return
+	}
+
+	if err = s.cacheMessageSendingTime(messageId); err != nil {
+		base.Log(fmt.Sprintf("Error caching sending time for message %s: %v", message.Id.String(), err))
+	}
+}
+
+func (s *MessageService) sendMessageToWebhook(message models.Message) (string, error) {
+	ws, err := s.WebhookClient.SendMessage(message.Recipient, message.Content, message.Id.String())
+	if err != nil {
+		return "", err
+	}
+
+	base.Log(fmt.Sprintf("Successfully sent message: %s", message.Id.String()))
+	return ws.MessageId, nil
+}
+
+func (s *MessageService) cacheMessageSendingTime(messageId string) error {
+	cacheKey := strings.ToLower(messageId)
+	cacheValue := time.Now().Format("2006-01-02.15.04.05")
+
+	return s.RedisClient.Set(cacheKey, cacheValue)
 }

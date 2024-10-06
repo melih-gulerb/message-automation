@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -32,10 +33,10 @@ type MessagePayload struct {
 
 type WebhookResponse struct {
 	Message   string `json:"message"`
-	MessageID string `json:"messageId"`
+	MessageId string `json:"messageId"`
 }
 
-func (w *WebhookClient) SendMessage(recipient string, content string) (*WebhookResponse, error) {
+func (w *WebhookClient) SendMessage(recipient, content, messageId string) (*WebhookResponse, error) {
 	payload := MessagePayload{
 		Recipient: recipient,
 		Content:   content,
@@ -58,7 +59,9 @@ func (w *WebhookClient) SendMessage(recipient string, content string) (*WebhookR
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		_ = Body.Close()
+	}(resp.Body)
 
 	if resp.StatusCode != http.StatusAccepted {
 		return nil, errors.New("failed to send message")
@@ -68,6 +71,8 @@ func (w *WebhookClient) SendMessage(recipient string, content string) (*WebhookR
 	if err := json.NewDecoder(resp.Body).Decode(&webhookResp); err != nil {
 		return nil, err
 	}
+	// Mocked because the lack of CustomAction in webhook.site
+	webhookResp.MessageId = messageId
 
 	return &webhookResp, nil
 }

@@ -1,9 +1,11 @@
 package repositories
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"message-automation/src/models"
+	"message-automation/src/models/base"
 	"message-automation/src/repositories/queries"
 )
 
@@ -16,13 +18,16 @@ func NewMessageRepository(db *sql.DB) *MessageRepository {
 	return &MessageRepository{DB: db}
 }
 
-func (r *MessageRepository) RetrieveSentMessages(limit int) ([]models.Message, error) {
-	rows, err := r.DB.Query(queries.GetSentMessagesQuery(limit))
+// GetSentMessages acquires sent message with filtering the limit and messageId if provided
+func (r *MessageRepository) GetSentMessages(limit int, messageId string) ([]models.Message, error) {
+	rows, err := r.DB.Query(queries.GetSentMessagesQuery(limit, messageId))
 	if err != nil {
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		_ = rows.Close()
+	}(rows)
 
 	var messages []models.Message
 	for rows.Next() {
@@ -38,6 +43,7 @@ func (r *MessageRepository) RetrieveSentMessages(limit int) ([]models.Message, e
 	return messages, nil
 }
 
+// GetUnsentMessages acquires unsent message with filtering the limit if provided
 func (r *MessageRepository) GetUnsentMessages(limit int) ([]models.Message, error) {
 	query := queries.GetUnsentMessagesQuery(limit)
 	rows, err := r.DB.Query(query)
@@ -45,7 +51,9 @@ func (r *MessageRepository) GetUnsentMessages(limit int) ([]models.Message, erro
 		return nil, err
 	}
 
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		_ = rows.Close()
+	}(rows)
 
 	var messages []models.Message
 	for rows.Next() {
@@ -61,20 +69,36 @@ func (r *MessageRepository) GetUnsentMessages(limit int) ([]models.Message, erro
 	return messages, nil
 }
 
-func (r *MessageRepository) UpdateMessageStatus(message models.Message) error {
+// UpdateMessageStatus updates the status of a message using a transaction if provided
+func (r *MessageRepository) UpdateMessageStatus(message models.Message, transaction *sql.Tx) error {
 	var err error
-	result, err := r.DB.Exec(queries.UpdateMessageStatus(message.Id, "Sent"))
+	var result sql.Result
+
+	if transaction != nil {
+		result, err = transaction.Exec(queries.UpdateMessageStatus(message.Id, "Sent"))
+	} else {
+		result, err = r.DB.Exec(queries.UpdateMessageStatus(message.Id, "Sent"))
+	}
+
 	if err != nil {
 		return err
 	}
-
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		return err
 	}
 	if rowsAffected == 0 {
-		return fmt.Errorf("message not found")
+		base.Log(fmt.Sprintf("Couldn't find any message to update"))
 	}
 
 	return nil
+}
+
+func (r *MessageRepository) BeginTransaction(ctx context.Context) (*sql.Tx, error) {
+	transaction, err := r.DB.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	return transaction, nil
 }

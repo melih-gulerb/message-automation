@@ -7,26 +7,28 @@ import (
 )
 
 type RedisClient struct {
-	RedisAddress  string
-	RedisPassword string
-	RedisDB       int
-	RedisTimeout  time.Duration
+	Client       *redis.Client
+	RedisTimeout time.Duration
 }
 
 func NewRedisClient(address, password string, db int, timeout time.Duration) *RedisClient {
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     address,
+		Password: password,
+		DB:       db,
+	})
+
 	return &RedisClient{
-		RedisAddress:  address,
-		RedisPassword: password,
-		RedisDB:       db,
-		RedisTimeout:  timeout,
+		Client:       rdb,
+		RedisTimeout: timeout,
 	}
 }
 
-func (r *RedisClient) Set(rdb *redis.Client, key string, value string) error {
+func (r *RedisClient) Set(key string, value string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 
-	err := rdb.Set(ctx, key, value, time.Hour).Err()
+	err := r.Client.Set(ctx, key, value, time.Hour).Err()
 	if err != nil {
 		return err
 	}
@@ -34,11 +36,11 @@ func (r *RedisClient) Set(rdb *redis.Client, key string, value string) error {
 	return nil
 }
 
-func (r *RedisClient) Get(rdb *redis.Client, key string) (string, error) {
+func (r *RedisClient) Get(key string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 
-	val, err := rdb.Get(ctx, key).Result()
+	val, err := r.Client.Get(ctx, key).Result()
 	if err != nil {
 		return "", err
 	}
