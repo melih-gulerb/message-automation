@@ -10,6 +10,7 @@ import (
 	"message-automation/src/validators"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,12 +21,13 @@ type MessageService struct {
 	IsActiveStatus      bool
 	MessagePerExecution int
 	ExecutionPeriod     time.Duration
+	Mu                  *sync.Mutex
 }
 
 func NewMessageService(messageRepository *repositories.MessageRepository, webhookClient *clients.WebhookClient,
 	redisClient *clients.RedisClient, messagePerExecution int, executionPeriod time.Duration) *MessageService {
 	return &MessageService{MessageRepository: messageRepository, WebhookClient: webhookClient, RedisClient: redisClient,
-		IsActiveStatus: true, MessagePerExecution: messagePerExecution, ExecutionPeriod: executionPeriod}
+		IsActiveStatus: true, MessagePerExecution: messagePerExecution, ExecutionPeriod: executionPeriod, Mu: &sync.Mutex{}}
 }
 
 func (s *MessageService) RetrieveSentMessages(limitQuery, messageId string) []models.Message {
@@ -55,7 +57,10 @@ func (s *MessageService) HandleAutomation(isActiveQuery string) {
 
 	isActive, _ := strconv.ParseBool(isActiveQuery)
 
+	s.Mu.Lock()
 	s.IsActiveStatus = isActive
+	s.Mu.Unlock()
+
 	if isActive {
 		go s.ExecuteAutomation()
 	}
@@ -80,7 +85,7 @@ func (s *MessageService) ExecuteAutomation() {
 		} else {
 			s.processMessages(s.MessagePerExecution)
 
-			base.Log(fmt.Sprintf("Message execution will restart after %v minutes", s.ExecutionPeriod.Minutes()))
+			base.Log(fmt.Sprintf("Message automation is executed, next start will after %v minutes", s.ExecutionPeriod.Minutes()))
 			time.Sleep(s.ExecutionPeriod)
 		}
 	}
