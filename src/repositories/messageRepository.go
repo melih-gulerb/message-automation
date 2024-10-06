@@ -17,7 +17,7 @@ func NewMessageRepository(db *sql.DB) *MessageRepository {
 }
 
 func (r *MessageRepository) RetrieveSentMessages(limit int) ([]models.Message, error) {
-	rows, err := r.DB.Query(queries.GetSentMessagesQuery(), limit)
+	rows, err := r.DB.Query(queries.GetSentMessagesQuery(limit))
 	if err != nil {
 		return nil, err
 	}

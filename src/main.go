@@ -2,7 +2,6 @@ package main
 
 import (
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
 	"message-automation/src/clients"
 	"message-automation/src/configs"
 	"message-automation/src/handlers"
@@ -17,12 +16,11 @@ func main() {
 	db := configs.InitDB(cfg.MSSQLConnectionString)
 	e := echo.New()
 	e.Use(middlewares.RecoverMiddleware)
-	e.Use(middleware.Recover())
-	e.Use(middleware.Logger())
 
 	messageRepository := repositories.NewMessageRepository(db)
 	webhookClient := clients.NewWebhookClient(cfg.WebhookBaseURL, cfg.WebhookToken)
 	redisClient := clients.NewRedisClient(cfg.RedisAddress, cfg.RedisPassword, cfg.RedisDB, cfg.RedisTimeout)
+
 	messageService := services.NewMessageService(messageRepository, webhookClient, redisClient)
 	messageHandler := handlers.NewMessageHandler(messageService)
 
@@ -31,8 +29,8 @@ func main() {
 	// Execute all unsent messages with the project deployment
 	messageService.ExecuteAutomationForProjectDeployment()
 
-	// Execute message automation async with 2 seconds period
-	go messageService.ExecuteAutomation(services.IsActiveChannel, 2)
+	// Execute message automation asynchronously with 2 seconds period
+	go messageService.ExecuteAutomation(2)
 
 	e.Logger.Fatal(e.Start(":3030"))
 }

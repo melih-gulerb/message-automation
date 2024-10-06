@@ -15,13 +15,11 @@ type MessageService struct {
 	MessageRepository *repositories.MessageRepository
 	WebhookClient     *clients.WebhookClient
 	RedisClient       *clients.RedisClient
+	IsActiveStatus    bool
 }
 
-var IsActiveChannel = make(chan bool)
-
 func NewMessageService(messageRepository *repositories.MessageRepository, webhookClient *clients.WebhookClient, redisClient *clients.RedisClient) *MessageService {
-
-	return &MessageService{MessageRepository: messageRepository, WebhookClient: webhookClient, RedisClient: redisClient}
+	return &MessageService{MessageRepository: messageRepository, WebhookClient: webhookClient, RedisClient: redisClient, IsActiveStatus: true}
 }
 
 func (s *MessageService) RetrieveSentMessages(limitQuery string) []models.Message {
@@ -45,38 +43,32 @@ func (s *MessageService) HandleAutomation(isActiveQuery string) {
 		panic(&base.BadRequestError{Message: fmt.Sprintf("Unable to parse boolean for %s", isActiveQuery)})
 	}
 
-	currentStatus := <-IsActiveChannel
-	if currentStatus == isActive {
-		panic(&base.BadRequestError{Message: "Automation is already in requested status"})
+	if s.IsActiveStatus == isActive {
+		panic(&base.BadRequestError{Message: fmt.Sprintf("Automation is already in requested state")})
+	} else {
+		s.IsActiveStatus = isActive
+		go s.ExecuteAutomation(2)
 	}
-
-	IsActiveChannel <- isActive
 
 	return
 }
 
-func (s *MessageService) ExecuteAutomation(isActiveChannel <-chan bool, limit int) {
+func (s *MessageService) ExecuteAutomation(limit int) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("Recovered from panic: %v. Retrying execution after 2 minutes...", r)
 			time.Sleep(15 * time.Second)
 
 			// Re-execute message automation after panic recovery
-			if limit != -1 {
-				go s.ExecuteAutomation(isActiveChannel, limit)
-			}
+			go s.ExecuteAutomation(limit)
 		}
 	}()
 
 	for {
-		select {
-		case isActive := <-isActiveChannel:
-			if !isActive {
-				fmt.Printf("\n[%s] Automation deactivated, stopping execution", time.Now().Format("2006-01-02.15.04.05"))
-				return
-			}
-
-		default:
+		if s.IsActiveStatus == false {
+			fmt.Printf("\n[%s] Automation deactivated, stopping execution", time.Now().Format("2006-01-02.15.04.05"))
+			return
+		} else {
 			s.executeAutomation(2)
 
 			fmt.Printf("\n[%s] Message execution will restart after 20 sec", time.Now().Format("2006-01-02.15.04.05"))
