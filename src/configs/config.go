@@ -6,7 +6,6 @@ import (
 	_ "github.com/denisenkom/go-mssqldb"
 	"message-automation/src/models/base"
 	"os"
-	"strconv"
 	"time"
 )
 
@@ -23,25 +22,16 @@ type Config struct {
 }
 
 func SetConfig() *Config {
-	messagePerExecution := 2 // Default
-	if messagePerExecutionCustom, err := strconv.Atoi(os.Getenv("MESSAGE_PER_EXECUTION")); err == nil {
-		messagePerExecution = messagePerExecutionCustom
-	}
-
-	executionPeriod := 2 // Default
-	if executionPeriodCustom, err := strconv.Atoi(os.Getenv("EXECUTION_PERIOD")); err == nil {
-		executionPeriod = executionPeriodCustom
-	}
 	return &Config{
 		WebhookBaseURL:        "https://webhook.site",
-		WebhookToken:          "ad14ab4c-d132-4ea5-a1b6-a8ded2932f02",
-		MSSQLConnectionString: os.Getenv("DATABASE_URL"),
-		RedisAddress:          os.Getenv("REDIS_ADDRESS"),
+		WebhookToken:          "",
+		MSSQLConnectionString: "",
+		RedisAddress:          "",
 		RedisPassword:         "",
 		RedisDB:               0,
 		RedisTimeout:          time.Hour,
-		MessagePerExecution:   messagePerExecution,
-		ExecutionPeriod:       time.Minute * time.Duration(executionPeriod),
+		MessagePerExecution:   2,
+		ExecutionPeriod:       time.Minute * 2,
 	}
 }
 

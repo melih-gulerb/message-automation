@@ -36,7 +36,7 @@ the sending of messages per specific period of time and specific count of messag
    ```
 3. **Initialize**
    ```bash
-   REDIS_ADDRESS="redis_address" DATABASE_URL="database_url" EXECUTION_PERIOD="2" MESSAGES_PER_EXECUTION="2" go run src/main.go
+   go run ./main.go
    ```
 
 ## Running with Docker
@@ -44,13 +44,8 @@ the sending of messages per specific period of time and specific count of messag
 docker build -t message-automation . 
 ```
 ```bash 
-docker run -p 3030:3030 -e REDIS_ADDRESS="redis_address" -e DATABASE_URL="database_url" message-automation 
+docker run -p 3030:3030 -e message-automation 
 ```
-#### Environment Variables
-- `REDIS_ADDRESS`: Redis address (default: `localhost:6379`)
-- `DATABASE_URL`: The connection string for MSSQL database
-- `EXECUTION_PERIOD`: The period of time (in minutes) between each message automation batch (default: 2 minutes).
-- `MESSAGES_PER_EXECUTION`: The number of messages processed per batch (default: 2).
 
 
 ## Endpoints
